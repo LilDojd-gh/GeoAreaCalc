@@ -48,7 +48,7 @@ def train_detection():
         train_dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=2,
+        num_workers=0,
         collate_fn=collate_fn,
         pin_memory=True if DEVICE == "cuda" else False
     )
