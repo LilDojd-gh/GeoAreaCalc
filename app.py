@@ -1,5 +1,6 @@
 import streamlit as st
 import torch
+import torch.nn.functional as F
 import cv2
 import numpy as np
 from PIL import Image
@@ -115,33 +116,46 @@ if uploaded_file is not None:
     image_pil = Image.open(uploaded_file).convert("RGB")
     image_np = np.array(image_pil)
 
-    # Подготовка тензора для PyTorch [Batch, Channels, Height, Width]
+    # Подготовка тензора для PyTorch
     unet, detector, device = load_models()
     img_tensor = torch.from_numpy(image_np.transpose(2, 0, 1)).float() / 255.0
     img_tensor = img_tensor.unsqueeze(0).to(device)
 
+    # ==========================================
+    # ИСПРАВЛЕНИЕ: Динамический паддинг для U-Net
+    # ==========================================
+    _, _, h, w = img_tensor.shape
+    # Считаем, сколько пикселей не хватает до кратности 32
+    pad_bottom = (32 - h % 32) % 32
+    pad_right = (32 - w % 32) % 32
+
+    # Добавляем временные полосы (left, right, top, bottom)
+    img_tensor_padded = F.pad(img_tensor, (0, pad_right, 0, pad_bottom))
+
     with st.spinner("⏳ Идет глубокий анализ изображения нейросетями..."):
         # ---- ШАГ 1: Детекция машин и расчет масштаба ----
         with torch.no_grad():
+            # Детектору паддинг не нужен, отдаем оригинал
             det_outputs = detector(img_tensor)[0]
 
-        # Фильтруем результаты по порогу и классу автомобиля (класс 1)
         valid_boxes = []
         for box, score, label in zip(det_outputs['boxes'], det_outputs['scores'], det_outputs['labels']):
             if score > det_threshold and label == 1:
                 valid_boxes.append(box.cpu().numpy())
 
-        # Вычисляем пространственное разрешение (GSD)
         gsd = calculate_gsd_from_cars(valid_boxes, real_car_length)
 
-        # Если на кадре нет машин, используем стандартную калибровку по умолчанию
         if gsd is None:
             st.sidebar.warning("⚠️ Автомобили не обнаружены. Применен стандартный масштаб по умолчанию: 0.3 м/px.")
             gsd = 0.3
 
         # ---- ШАГ 2: Сегментация строений ----
         with torch.no_grad():
-            seg_output = unet(img_tensor)[0, 0].cpu().numpy()
+            # Отправляем в U-Net тензор с кратными сторонами
+            seg_output_padded = unet(img_tensor_padded)[0, 0].cpu().numpy()
+
+        # ОБРЕЗАЕМ добавленные полосы, возвращая маске строгий оригинальный размер
+        seg_output = seg_output_padded[:h, :w]
 
         # Формируем бинарную маску по установленному пользователем порогу
         binary_mask = (seg_output > seg_threshold).astype(np.float32)
