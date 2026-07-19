@@ -39,7 +39,7 @@ def train_segmentation():
         train_dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=2,
+        num_workers=0,
         pin_memory=True if DEVICE == "cuda" else False
     )
 
@@ -85,11 +85,12 @@ def train_segmentation():
             optimizer.step()  # Корректируем веса сети
 
             # --- Сбор метрик качества ---
-            # Отсекаем тензоры от графа вычислений (.detach()) для экономии памяти
-            preds_cpu = predictions.detach().cpu()
-            masks_cpu = masks.detach().cpu()
-
-            iou, dice = calculate_metrics(preds_cpu, masks_cpu, threshold=0.5)
+            # # Отсекаем тензоры от графа вычислений (.detach()) для экономии памяти
+            # preds_cpu = predictions.detach().cpu()
+            # masks_cpu = masks.detach().cpu()
+            #
+            # iou, dice = calculate_metrics(preds_cpu, masks_cpu, threshold=0.5)
+            iou, dice = calculate_metrics(predictions.detach(), masks.detach(), threshold=0.5)
 
             # Накапливаем статистику шага
             epoch_loss += loss.item()
