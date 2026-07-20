@@ -56,7 +56,7 @@ source venv/bin/activate
 Bash
 pip install -r requirements.txt
 4. Запуск веб-интерфейса
-Убедитесь, что обученные веса (unet_best.pth и detector_best.pth) находятся в папке weights/. Запустите приложение командой:
+Убедитесь, что обученные веса (unet_best.pth и detector_best.pth) находятся в папке weights/. Запустите приложение командой: веса детектора весят очень много, поэтому их можно скачать здесь отдельно: https://drive.google.com/drive/folders/16rwMXbw19zDaj8QOOf_-dbDAT3wn5nYS?usp=sharing
 
 Bash
 streamlit run app.py
