@@ -110,61 +110,52 @@ class VehicleDetectionDataset(Dataset):
         self.transform = transform
 
         self.images = [f for f in os.listdir(image_dir) if f.lower().endswith(('.jpg', '.png'))]
-        self.cache = {}
-
-        # 512 - отличный баланс: машины всё еще видно, а оперативная память не взрывается
-        self.target_size = 512
+        # Кэш удален для экономии оперативной памяти (RAM)
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        # 1. ЧТЕНИЕ ИЛИ ДОСТАВАНИЕ ИЗ КЭША
-        if idx in self.cache:
-            image, cached_boxes, cached_labels = self.cache[idx]
-            # Делаем глубокую копию, чтобы аугментации не перезаписали оригинальный кэш!
-            boxes = [box[:] for box in cached_boxes]
-            labels = list(cached_labels)
-        else:
-            img_name = self.images[idx]
-            img_path = os.path.join(self.image_dir, img_name)
-            txt_name = os.path.splitext(img_name)[0] + '.txt'
-            label_path = os.path.join(self.label_dir, txt_name)
+        # Читаем картинку и разметку с диска КАЖДЫЙ РАЗ
+        img_name = self.images[idx]
+        img_path = os.path.join(self.image_dir, img_name)
+        txt_name = os.path.splitext(img_name)[0] + '.txt'
+        label_path = os.path.join(self.label_dir, txt_name)
 
-            image = cv2.imread(img_path)
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = cv2.imread(img_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-            # Сжимаем фото перед сохранением в RAM
-            image = cv2.resize(image, (self.target_size, self.target_size))
-            h, w = self.target_size, self.target_size
+        h, w, _ = image.shape
 
-            boxes = []
-            labels = []
+        boxes = []
+        labels = []
 
-            if os.path.exists(label_path):
-                with open(label_path, 'r') as f:
-                    for line in f.readlines():
-                        parts = line.strip().split()
-                        if len(parts) != 5: continue
+        if os.path.exists(label_path):
+            with open(label_path, 'r') as f:
+                for line in f.readlines():
+                    parts = line.strip().split()
+                    if len(parts) != 5: continue
 
-                        class_id, x_c, y_c, bw, bh = map(float, parts)
+                    class_id, x_c, y_c, bw, bh = map(float, parts)
 
-                        xmin = (x_c - bw / 2) * w
-                        ymin = (y_c - bh / 2) * h
-                        xmax = (x_c + bw / 2) * w
-                        ymax = (y_c + bh / 2) * h
+                    raw_xmin = (x_c - bw / 2) * w
+                    raw_ymin = (y_c - bh / 2) * h
+                    raw_xmax = (x_c + bw / 2) * w
+                    raw_ymax = (y_c + bh / 2) * h
 
-                        boxes.append([xmin, ymin, xmax, ymax])
-                        labels.append(1)  # 1 - класс "Автомобиль"
+                    # Жесткая защита от выхода за границы
+                    xmin = max(0.0, raw_xmin)
+                    ymin = max(0.0, raw_ymin)
+                    xmax = min(float(w), raw_xmax)
+                    ymax = min(float(h), raw_ymax)
 
-            # Сохраняем в оперативную память
-            self.cache[idx] = (image, boxes, labels)
+                    if xmax - xmin < 1.0 or ymax - ymin < 1.0:
+                        continue
 
-            # Создаем рабочие копии для текущей эпохи
-            boxes = [box[:] for box in boxes]
-            labels = list(labels)
+                    boxes.append([xmin, ymin, xmax, ymax])
+                    labels.append(1)  # 1 - класс "Автомобиль"
 
-        # 2. АУГМЕНТАЦИИ И ФОРМАТИРОВАНИЕ ТЕНЗОРОВ
+        # Аугментации и форматирование тензоров
         if self.transform is not None:
             transformed = self.transform(image=image, bboxes=boxes, class_labels=labels)
             image = transformed['image']
@@ -173,7 +164,6 @@ class VehicleDetectionDataset(Dataset):
         else:
             image = torch.from_numpy(image.transpose(2, 0, 1))
 
-        # Переводим в float32 (требование Faster R-CNN)
         if isinstance(image, torch.Tensor) and image.dtype == torch.uint8:
             image = image.float() / 255.0
         elif isinstance(image, np.ndarray):
